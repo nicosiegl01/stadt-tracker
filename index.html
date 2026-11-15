@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Stadt Tracker</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://overpass-api.de https://overpass.private.coffee https://overpass.kumi.systems; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="theme-color" content="#1f9d55">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Stadt Tracker">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<link rel="stylesheet" href="leaflet.css">
+<style>
+:root {
+  --bg: #f2f3f5; --card: #ffffff; --text: #14181d; --muted: #6b7480; --line: #e3e6ea;
+  --green: #1f9d55; --green-soft: #d9f2e3; --red: #e5484d; --blue: #2f7de1; --orange: #f08c00; --gold: #f5b700;
+  --glass: rgba(255,255,255,.86); --shadow: 0 4px 18px rgba(0,0,0,.14);
+  --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1215; --card: #1a1f24; --text: #eef1f4; --muted: #98a2ae; --line: #2a3138;
+    --green-soft: #173a27; --glass: rgba(26,31,36,.86); --shadow: 0 4px 18px rgba(0,0,0,.5); }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; margin: 0; }
+body { font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text);
+  overflow: hidden; overscroll-behavior: none; -webkit-user-select: none; user-select: none; }
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; padding: 0; }
+input, select { font: inherit; color: inherit; }
+#app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+.view { flex: 1; min-height: 0; display: none; position: relative; }
+.view.active { display: block; }
+.view.scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: calc(var(--sat) + 14px) 14px 20px; }
+h1 { font-size: 28px; margin: 4px 2px 14px; letter-spacing: -.02em; display: flex; align-items: center; justify-content: space-between; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Karte */
+#map { position: absolute; inset: 0; background: var(--bg); }
+.leaflet-container { font: inherit; }
+.leaflet-control-attribution { font-size: 10px; }
+.hud { position: absolute; z-index: 500; left: 12px; right: 12px; top: calc(var(--sat) + 10px); display: flex; align-items: center; gap: 14px;
+  padding: 10px 16px; border-radius: 18px; background: var(--glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); box-shadow: var(--shadow); }
+.hud .pct { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.hud .right { margin-left: auto; text-align: right; }
+.hud .right b { font-size: 15px; display: block; }
+.ring { width: 38px; height: 38px; position: relative; flex: none; }
+.ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 4; }
+.ring .bg { stroke: var(--green-soft); }
+.ring .fg { stroke: var(--green); stroke-linecap: round; transition: stroke-dashoffset .4s; }
+.ring span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 15px; }
+.controls { position: absolute; z-index: 500; left: 12px; right: 12px; bottom: 26px; display: flex; gap: 10px; align-items: center; }
+.round { width: 50px; height: 50px; border-radius: 50%; background: var(--glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  box-shadow: var(--shadow); display: grid; place-items: center; flex: none; }
+.round svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.round.on { color: var(--blue); }
+.round.off { color: var(--muted); }
+#btn-track { flex: 1; height: 50px; border-radius: 25px; background: var(--green); color: #fff; font-weight: 700; font-size: 17px; box-shadow: var(--shadow); }
+#btn-track.on { background: var(--red); }
+#gps-note { position: absolute; z-index: 500; left: 12px; right: 12px; bottom: 88px; padding: 10px 12px; border-radius: 12px; font-size: 13px;
+  background: var(--glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); box-shadow: var(--shadow); display: none; }
+.me-dot { width: 18px; height: 18px; border-radius: 50%; background: var(--blue); border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15), 0 2px 6px rgba(0,0,0,.3); }
+.pin-label { background: var(--card); color: var(--text); border: 0; border-radius: 10px; padding: 4px 9px; font-weight: 600; box-shadow: var(--shadow); }
+.pin-label::before { display: none; }
+
+/* Tabs */
+nav.tabs { flex: none; display: flex; background: var(--card); border-top: 1px solid var(--line); padding-bottom: var(--sab); }
+nav.tabs button { flex: 1; padding: 8px 0 6px; font-size: 11px; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 2px; }
+nav.tabs svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+nav.tabs button.active { color: var(--green); }
+
+/* Karten & Listen */
+.card { background: var(--card); border-radius: 16px; padding: 16px; margin-bottom: 12px; }
+.card h2 { font-size: 16px; margin: 0 0 10px; }
+.row { display: flex; align-items: center; gap: 10px; }
+.between { justify-content: space-between; }
+.bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 4px; background: var(--green); }
+.bar.gold i { background: var(--gold); } .bar.blue i { background: var(--blue); } .bar.orange i { background: var(--orange); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.tile { background: var(--card); border-radius: 16px; padding: 14px; }
+.tile .v { font-size: 20px; font-weight: 700; margin-top: 4px; }
+.bigring { width: 104px; height: 104px; position: relative; flex: none; }
+.bigring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.bigring circle { fill: none; stroke-width: 10; }
+.bigring .bg { stroke: var(--green-soft); } .bigring .fg { stroke: var(--green); stroke-linecap: round; }
+.bigring span { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; }
+.week { display: flex; align-items: flex-end; gap: 8px; height: 120px; }
+.week div { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; font-size: 11px; color: var(--muted); }
+.week i { width: 100%; border-radius: 5px 5px 2px 2px; background: var(--green); min-height: 2px; }
+.district { margin-bottom: 11px; }
+.district:last-child { margin-bottom: 0; }
+.district .row { margin-bottom: 4px; font-size: 14px; }
+.gear svg { width: 24px; height: 24px; stroke: var(--muted); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+#street-search { width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); outline: none; -webkit-user-select: text; user-select: text; }
+.seg { display: flex; background: var(--line); border-radius: 10px; padding: 2px; margin: 10px 0; }
+.seg button { flex: 1; padding: 6px 0; border-radius: 8px; font-size: 13px; }
+.seg button.active { background: var(--card); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.street { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.street .dot { width: 30px; height: 30px; flex: none; position: relative; }
+.street .dot svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.street .dot circle { fill: none; stroke-width: 4; }
+.street .dot .bg { stroke: var(--line); } .street .dot .fg { stroke: var(--blue); stroke-linecap: round; }
+.street.done .dot .fg { stroke: var(--green); }
+.street .name { flex: 1; min-width: 0; }
+.street .name b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.more { display: block; width: 100%; padding: 12px; margin-top: 8px; border-radius: 12px; background: var(--card); font-weight: 600; color: var(--green); }
+
+.awards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.award { background: var(--card); border-radius: 16px; padding: 14px 10px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 168px; }
+.award .ico { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; font-size: 26px; background: var(--line); filter: grayscale(1); opacity: .55; }
+.award.on .ico { background: #fdf0c4; filter: none; opacity: 1; }
+.award b { font-size: 14px; }
+.award .bar { width: 100%; margin-top: auto; }
+
+/* Overlays */
+#setup { position: fixed; inset: 0; z-index: 2000; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px; gap: 16px; }
+#setup .logo { width: 88px; height: 88px; border-radius: 22px; background: var(--green); display: grid; place-items: center; font-size: 44px; }
+#setup h1 { display: block; margin: 0; }
+#setup p { margin: 0; max-width: 340px; }
+.primary { background: var(--green); color: #fff; font-weight: 700; padding: 14px 22px; border-radius: 14px; width: 100%; max-width: 340px; }
+#setup .bar { width: 100%; max-width: 340px; }
+.err { color: var(--red); }
+#toast { position: fixed; z-index: 3000; left: 14px; right: 14px; top: calc(var(--sat) + 10px); padding: 12px 16px; border-radius: 18px; background: var(--card);
+  box-shadow: var(--shadow); display: flex; gap: 12px; align-items: center; transform: translateY(-160%); transition: transform .35s cubic-bezier(.2,.9,.3,1.2); }
+#toast.show { transform: none; }
+#toast .ico { font-size: 26px; }
+#sheet { position: fixed; inset: 0; z-index: 2500; background: rgba(0,0,0,.4); display: none; align-items: flex-end; }
+#sheet.show { display: flex; }
+#sheet .panel { background: var(--bg); width: 100%; max-height: 90%; overflow-y: auto; border-radius: 20px 20px 0 0; padding: 18px 14px calc(var(--sab) + 18px); }
+.setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.setting:last-child { border-bottom: 0; }
+.setting select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.setting input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--green); }
+.linkbtn { color: var(--blue); text-align: left; width: 100%; padding: 12px 0; border-bottom: 1px solid var(--line); display: block; }
+.linkbtn.danger { color: var(--red); border-bottom: 0; }
+.linkbtn.viewopt.sel { font-weight: 700; color: var(--green); }
+.card .linkbtn:last-child { border-bottom: 0; }
+.textbtn { font-size: 16px; color: var(--blue); font-weight: 600; }
+.field { display: block; width: 100%; padding: 12px; margin: 10px 0; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); outline: none; -webkit-user-select: text; user-select: text; }
+.field:focus { border-color: var(--green); }
+.primary.wide { max-width: none; display: block; margin-top: 6px; }
+button:disabled { opacity: .5; }
+.pill { padding: 7px 12px; border-radius: 999px; background: var(--line); font-size: 14px; font-weight: 600; white-space: nowrap; flex: none; }
+.pill.ok { background: var(--green); color: #fff; }
+.rank { width: 30px; height: 30px; border-radius: 50%; background: var(--green-soft); display: grid; place-items: center; font-weight: 700; font-size: 14px; flex: none; }
+.code { font: 600 15px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; -webkit-user-select: text; user-select: text; word-break: break-all; }
+.qr { display: block; width: 190px; height: 190px; margin: 8px auto; background: #fff; border-radius: 12px; padding: 8px; }
+#views { position: fixed; inset: 0; z-index: 2500; background: rgba(0,0,0,.4); display: none; align-items: flex-end; }
+#views.show { display: flex; }
+#views .panel { background: var(--bg); width: 100%; max-height: 80%; overflow-y: auto; border-radius: 20px 20px 0 0; padding: 18px 14px calc(var(--sab) + 18px); }
+#view-chip { position: absolute; z-index: 500; top: calc(var(--sat) + 82px); left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; background: #7c4dff; color: #fff;
+  font-size: 13px; font-weight: 600; box-shadow: var(--shadow); display: none; white-space: pre; }
+</style>
+</head>
+<body>
+<div id="app">
+  <section class="view active" id="v-map">
+    <div id="map"></div>
+    <div class="hud">
+      <div><div class="pct num" id="hud-pct">0,00 %</div><div class="small muted" id="hud-city">von Wien</div></div>
+      <div class="right"><b id="hud-level">Level 1</b><span class="small muted" id="hud-streets">0 Straßen fertig</span></div>
+      <div class="ring"><svg viewBox="0 0 38 38"><circle class="bg" cx="19" cy="19" r="15"/><circle class="fg" id="hud-ring" cx="19" cy="19" r="15" stroke-dasharray="94.25" stroke-dashoffset="94.25"/></svg><span id="hud-flame">🚶</span></div>
+    </div>
+    <button id="view-chip"></button>
+    <div id="gps-note"></div>
+    <div class="controls">
+      <button class="round" id="btn-eye" aria-label="Offene Straßen ein- oder ausblenden"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+      <button class="round" id="btn-next" aria-label="Nächste offene Straße"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></button>
+      <button class="round" id="btn-people" aria-label="Kartenansicht: ich, Freunde oder alle"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.8a3.5 3.5 0 0 1 0 6.4M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></svg></button>
+      <button id="btn-track">Start</button>
+      <button class="round" id="btn-follow" aria-label="Auf meinen Standort zentrieren"><svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l7.5 3L13.5 21z"/></svg></button>
+    </div>
+  </section>
+
+  <section class="view scroll" id="v-progress">
+    <h1>Fortschritt <button class="gear" id="btn-settings" aria-label="Einstellungen"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></h1>
+    <div id="progress-body"></div>
+  </section>
+
+  <section class="view scroll" id="v-streets">
+    <h1>Straßen</h1>
+    <input id="street-search" type="search" placeholder="Straße suchen" autocomplete="off">
+    <div class="seg" id="street-filter">
+      <button data-f="all">Alle</button><button data-f="open">Offen</button><button data-f="started" class="active">Angefangen</button><button data-f="done">Fertig</button>
+    </div>
+    <div class="small muted" id="street-count"></div>
+    <div id="street-list"></div>
+  </section>
+
+  <section class="view scroll" id="v-awards">
+    <h1>Erfolge</h1>
+    <div id="awards-body"></div>
+  </section>
+
+  <section class="view scroll" id="v-friends">
+    <h1>Freunde</h1>
+    <div id="friends-body"></div>
+  </section>
+
+  <nav class="tabs">
+    <button data-tab="map" class="active"><svg viewBox="0 0 24 24"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"/></svg>Karte</button>
+    <button data-tab="progress"><svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Fortschritt</button>
+    <button data-tab="streets"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>Straßen</button>
+    <button data-tab="friends"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.8a3.5 3.5 0 0 1 0 6.4M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></svg>Freunde</button>
+    <button data-tab="awards"><svg viewBox="0 0 24 24"><path d="M7 4h10v5a5 5 0 0 1-10 0V4zM7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3M12 14v4M8 20h8"/></svg>Erfolge</button>
+  </nav>
+</div>
+
+<div id="setup">
+  <div class="logo">🗺️</div>
+  <h1>Stadt Tracker</h1>
+  <p class="muted" id="setup-text">Straßennetz wird geladen …</p>
+  <div class="bar" id="setup-bar" style="display:none"><i style="width:0"></i></div>
+  <p class="err small" id="setup-error" style="display:none"></p>
+  <button class="primary" id="setup-btn" style="display:none">Straßendaten laden</button>
+  <p class="muted small" id="setup-hint" style="display:none">Einmaliger Download aus OpenStreetMap (rund 20 MB, ein bis zwei Minuten). Am besten im WLAN.</p>
+</div>
+
+<div id="toast"><div class="ico" id="toast-ico"></div><div><b id="toast-title"></b><div class="small muted" id="toast-sub"></div></div></div>
+
+<div id="sheet">
+  <div class="panel">
+    <h1>Einstellungen <button id="sheet-close" class="textbtn">Fertig</button></h1>
+    <div class="card">
+      <div class="setting"><span>Tagesziel</span><select id="set-goal"><option value="500">500 m</option><option value="1000">1 km</option><option value="2000">2 km</option><option value="5000">5 km</option><option value="10000">10 km</option></select></div>
+      <div class="setting"><span>Offene Straßen rot anzeigen</span><input type="checkbox" id="set-open"></div>
+    </div>
+    <div class="card">
+      <button class="linkbtn" id="set-import">GPX-Datei importieren</button>
+      <button class="linkbtn" id="set-export">Sicherung als GPX exportieren</button>
+      <button class="linkbtn" id="set-reload">Straßendaten neu laden</button>
+      <button class="linkbtn danger" id="set-reset">Fortschritt zurücksetzen</button>
+      <input type="file" id="file-gpx" accept=".gpx,application/gpx+xml,text/xml,application/xml" multiple style="display:none">
+    </div>
+    <p class="small muted" style="padding:0 6px">Die Aufzeichnung läuft nur, solange diese Seite offen und der Bildschirm an ist – während der Aufzeichnung bleibt er deshalb eingeschaltet. Strecken aus anderen Apps kannst du als GPX importieren. Alle Daten bleiben in diesem Browser; exportiere ab und zu eine Sicherung.<br><br>Kartendaten © OpenStreetMap-Mitwirkende (ODbL).</p>
+  </div>
+</div>
+
+<div id="views"><div class="panel" id="views-panel"></div></div>
+
+<script src="leaflet.js"></script>
+<script src="supabase.js"></script>
+<script src="config.js"></script>
+<script src="core.js"></script>
+<script src="app.js"></script>
+<script src="cloud.js"></script>
+</body>
+</html>
